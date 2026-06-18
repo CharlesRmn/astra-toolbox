@@ -52,9 +52,16 @@ class CProjectionGeometry3D;
 class CProjector3D;
 
 
+enum EGPUJobDistribution {
+	TRY_AVOID_SPLIT,
+	FORCE_AVOID_SPLIT,
+	FORCE_SPLIT,
+};
+
 struct SGPUParams {
 	std::vector<int> GPUIndices;
 	size_t memory;
+	EGPUJobDistribution distrib;
 };
 
 struct SFDKSettings {
@@ -191,6 +198,7 @@ public:
 	void setGPUIndices(const std::vector<int>& GPUIndices);
 
 	static void setGlobalGPUParams(const SGPUParams& params);
+	static SGPUParams getGlobalGPUParams();
 
 protected:
 
@@ -198,7 +206,7 @@ protected:
 
 	std::vector<int> m_GPUIndices;
 	size_t m_iMaxSize;
-
+	EGPUJobDistribution e_distrib;
 
 	static SGPUParams* s_params;
 };

@@ -65,6 +65,9 @@ CCompositeGeometryManager::CCompositeGeometryManager()
 	if (s_params) {
 		m_iMaxSize = s_params->memory;
 		m_GPUIndices = s_params->GPUIndices;
+		e_distrib = s_params->distrib;
+	} else {
+		e_distrib = TRY_AVOID_SPLIT;
 	}
 }
 
@@ -1356,26 +1359,21 @@ void runEntries(WorkThreadInfo* info)
 }
 
 void runWorkQueue(WorkQueue &queue, const std::vector<int> & iGPUIndices) {
-	int iThreadCount = iGPUIndices.size();
-
-	std::vector<WorkThreadInfo> infos;
-	std::vector<std::thread*> threads;
-	infos.resize(iThreadCount);
-	threads.resize(iThreadCount);
+	const int iThreadCount = iGPUIndices.size();
 	ASTRA_DEBUG("Thread count %d", iThreadCount);
+
+	std::vector<WorkThreadInfo> infos(iThreadCount);
+	std::vector<std::thread> threads;
+	threads.reserve(iThreadCount);
 
 	for (int i = 0; i < iThreadCount; ++i) {
 		infos[i].m_queue = &queue;
 		infos[i].m_iGPU = iGPUIndices[i];
-		threads[i] = new std::thread(runEntries, &infos[i]);
+		threads.emplace_back(runEntries, &infos[i]);
 	}
 
-	// Wait for them to finish
-	for (int i = 0; i < iThreadCount; ++i) {
-		threads[i]->join();
-		delete threads[i];
-		threads[i] = 0;
-	}
+	for (std::thread &t : threads)
+		t.join();
 }
 
 
@@ -1431,7 +1429,9 @@ bool CCompositeGeometryManager::doJobs(TJobSetInternal &jobset)
 
 	maxSize /= sizeof(float);
 	int div = 1;
-	if (!m_GPUIndices.empty())
+	if (!m_GPUIndices.empty()
+			&& (jobset.size() <= 1 || e_distrib == FORCE_SPLIT)
+			&& (e_distrib != FORCE_AVOID_SPLIT) )
 		div = m_GPUIndices.size();
 
 	// Split jobs to fit
@@ -1439,7 +1439,7 @@ bool CCompositeGeometryManager::doJobs(TJobSetInternal &jobset)
 	splitJobs(jobset, maxSize, div, split);
 	jobset.clear();
 
-	if (m_GPUIndices.size() <= 1) {
+	if (m_GPUIndices.size() <= 1 || split.size() <= 1) {
 
 		// Run jobs
 		ASTRA_DEBUG("Running single-threaded");
@@ -1496,6 +1496,21 @@ void CCompositeGeometryManager::setGlobalGPUParams(const SGPUParams& params)
 	std::string ss = s.str();
 	ASTRA_DEBUG("%s", ss.c_str());
 	ASTRA_DEBUG("Memory: %zu", params.memory);
+}
+
+//static
+SGPUParams CCompositeGeometryManager::getGlobalGPUParams()
+{
+	std::unique_lock lock{g_GPUParams_mutex};
+	if (s_params) {
+		return *s_params;
+	} else {
+		SGPUParams params;
+		params.GPUIndices.push_back(-1);
+		params.memory = 0;
+		params.distrib = TRY_AVOID_SPLIT;
+		return params;
+	}
 }
 
 
